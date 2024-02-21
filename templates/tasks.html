@@ -1,0 +1,28 @@
+{{ define "content" }}
+<div class="container">
+    <table class="table">
+    <thead class="thead-dark">
+    <tr>
+        <th class="font-weight-bold text-center">id</th>
+        <th class="font-weight-bold text-center">Пример</th>
+        <th class="font-weight-bold text-center">Статус</th>
+        <th class="font-weight-bold text-center">Результат</th>
+        <th class="font-weight-bold text-center">Начало вычислений</th>
+        <th class="font-weight-bold text-center">Конец вычислений</th>
+    </tr>
+    </thead>
+    <tbody>
+    {{ range .Tasks }}
+    <tr>
+        <td class="font-weight-bold text-center">{{ .id }}</td>
+        <td class="font-weight-bold text-center">{{ .task }}</td>
+        <td class="font-weight-bold text-center">{{ .status }}</td>
+        <td class="font-weight-bold text-center">{{ .result }}</td>
+        <td class="font-weight-bold text-center">{{ .start }}</td>
+        <td class="font-weight-bold text-center">{{ .finish }}</td>
+    </tr>
+    {{ end }}
+    </tbody>
+    </table>
+  </div>
+{{ end }}

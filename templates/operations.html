@@ -1,0 +1,24 @@
+{{ define "content" }}
+<div class="container">
+    <form action="/operations" method="post">
+      <table class="table">
+        <thead class="thead-dark">
+        <tr>
+          <th class="font-weight-bold text-center">Тип</th>
+          <th class="font-weight-bold text-center">Время в миллисекундах</th>
+        </tr>
+        </thead>
+        <tbody>
+        {{ range .Operations }}
+        <tr>
+          <td class="font-weight-bold text-center">{{ .operation }}</td>
+          <td><input class="form-control" name="{{ .operation }}" value="{{ .duration }}"></td>
+        </tr>
+        {{ end }}
+        </tbody>
+      </table>
+  
+      <button type="submit" class="btn btn-primary">Отправить</button>
+    </form>
+  </div>
+{{ end }}
