@@ -282,6 +282,7 @@ func Parse_Task(task []rune) float64 {
 func createTable(db *sql.DB) {
 	db.Exec("CREATE TABLE IF NOT EXISTS Tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, task TEXT, status TEXT, result REAL, start TEXT, finish TEXT)")
 	db.Exec("CREATE TABLE IF NOT EXISTS Operations (operation TEXT PRIMARY KEY, duration INTEGER)")
+	db.Exec("CREATE TABLE IF NOT EXISTS Calc (id INTEGER PRIMARY KEY AUTOINCREMENT, calc TEXT)")
 	db.Exec("INSERT OR IGNORE INTO Operations (operation, duration) VALUES ('+', 1)")
 	db.Exec("INSERT OR IGNORE INTO Operations (operation, duration) VALUES ('-', 1)")
 	db.Exec("INSERT OR IGNORE INTO Operations (operation, duration) VALUES ('*', 1)")
@@ -339,9 +340,6 @@ func operations(w http.ResponseWriter, r *http.Request) {
 	columns, _ := rows.Columns()
 	var result []map[string]interface{}
 	for rows.Next() {
-		var operation string
-		var time string
-		rows.Scan(&operation, &time)
 		values := make([]interface{}, len(columns))
 		valuePtr := make([]interface{}, len(columns))
 		for i := range columns {
@@ -375,9 +373,6 @@ func tasks(w http.ResponseWriter, r *http.Request) {
 	columns, _ := rows.Columns()
 	var result []map[string]interface{}
 	for rows.Next() {
-		var operation string
-		var time string
-		rows.Scan(&operation, &time)
 		values := make([]interface{}, len(columns))
 		valuePtr := make([]interface{}, len(columns))
 		for i := range columns {
@@ -406,6 +401,42 @@ func tasks(w http.ResponseWriter, r *http.Request) {
 	tmpl.ExecuteTemplate(w, "base.html", data)
 }
 
+func calc(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "POST" {
+		db.Exec("INSERT OR IGNORE INTO Calc (calc) VALUES ('')")
+	}
+	rows, _ := db.Query("SELECT * FROM Calc")
+	columns, _ := rows.Columns()
+	var result []map[string]interface{}
+	for rows.Next() {
+		values := make([]interface{}, len(columns))
+		valuePtr := make([]interface{}, len(columns))
+		for i := range columns {
+			valuePtr[i] = &values[i]
+		}
+		rows.Scan(valuePtr...)
+		row := make(map[string]interface{})
+		for i, column := range columns {
+			val := values[i]
+			if val != nil {
+				row[column] = val
+			} else {
+				row[column] = nil
+			}
+		}
+		result = append(result, row)
+	}
+	data := struct {
+		Title string
+		Calc  []map[string]interface{}
+	}{
+		Title: "Операции",
+		Calc:  result,
+	}
+	tmpl, _ := template.ParseFiles("templates\\base.html", "templates\\calc.html")
+	tmpl.ExecuteTemplate(w, "base.html", data)
+}
+
 var db *sql.DB
 
 func main() {
@@ -420,6 +451,7 @@ func main() {
 	defer db.Close()
 	http.HandleFunc("/operations", operations)
 	http.HandleFunc("/add_task_page", add_task_page)
+	http.HandleFunc("/calc", calc)
 	http.HandleFunc("/tasks", tasks)
 	http.ListenAndServe(":8080", nil)
 }

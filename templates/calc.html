@@ -1,0 +1,24 @@
+{{ define "content" }}
+<div class="container">
+    <form action="/calc" method="post">
+      <table class="table">
+        <thead class="thead-dark">
+        <tr>
+          <th class="font-weight-bold text-center">id</th>
+          <th class="font-weight-bold text-center">Занятость</th>
+        </tr>
+        </thead>
+        <tbody>
+        {{ range .Calc }}
+        <tr>
+          <td class="font-weight-bold text-center">{{ .id }}</td>
+          <td class="font-weight-bold text-center">{{ .calc }}</td>
+        </tr>
+        {{ end }}
+        </tbody>
+      </table>
+  
+      <button type="submit" class="btn btn-primary">Добавить</button>
+    </form>
+  </div>
+{{ end }}
