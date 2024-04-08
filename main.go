@@ -292,10 +292,50 @@ func createTable(db *sql.DB) {
 func add_task(task string) {
 	equation := strings.ReplaceAll(task, " ", "")
 	equation = strings.ReplaceAll(equation, ",", ".")
+
+	rows, _ := db.Query("SELECT * FROM Calc WHERE calc=''")
+	columns, _ := rows.Columns()
+	ar_of_rows := make([][]interface{}, 0)
+	for rows.Next() {
+		values := make([]interface{}, len(columns))
+		valuePtr := make([]interface{}, len(columns))
+		for i := range columns {
+			valuePtr[i] = &values[i]
+		}
+		rows.Scan(valuePtr...)
+		ar_of_rows = append(ar_of_rows, values)
+	}
+	if len(ar_of_rows) == 0 {
+		stmt, _ := db.Prepare("INSERT OR IGNORE INTO Tasks (task, status) VALUES (?, ?)")
+		stmt.Exec(equation, "Ожидает свободного сервера для начала вычислений")
+		stmt.Close()
+		for len(ar_of_rows) == 0 {
+			time.Sleep(200 * time.Millisecond)
+			rows, _ := db.Query("SELECT * FROM Calc WHERE calc=''")
+			columns, _ := rows.Columns()
+			ar_of_rows = make([][]interface{}, 0)
+			for rows.Next() {
+				values := make([]interface{}, len(columns))
+				valuePtr := make([]interface{}, len(columns))
+				for i := range columns {
+					valuePtr[i] = &values[i]
+				}
+				rows.Scan(valuePtr...)
+				ar_of_rows = append(ar_of_rows, values)
+			}
+		}
+	} else {
+		stmt, _ := db.Prepare("INSERT OR IGNORE INTO Tasks (task) VALUES (?)")
+		stmt.Exec(equation)
+		stmt.Close()
+	}
+	stmt, _ := db.Prepare("UPDATE Calc SET calc=? WHERE id=?")
+	stmt.Exec(equation, ar_of_rows[0][0])
+	stmt.Close()
 	if ValidEquation(equation, 0, len(equation)) && CheckBrackets(equation) {
-		stmt, _ := db.Prepare("INSERT OR IGNORE INTO Tasks (task, status, start) VALUES (?, ?, ?)")
+		stmt, _ := db.Prepare("UPDATE Tasks SET status=?, start=? WHERE task = ?")
 		defer stmt.Close()
-		stmt.Exec(equation, "Проводится подсчёт выражения", time.Now().Format("01-02-2006 15:04:05"))
+		stmt.Exec("Проводится подсчёт выражения", time.Now().Format("01-02-2006 15:04:05"), equation)
 		result := Parse_Task(delete_useless_brackets([]rune(equation)))
 		if math.IsInf(result, 0) {
 			stmt, _ = db.Prepare("UPDATE Tasks SET status=?, result = ?, finish = ? WHERE task = ?")
@@ -309,6 +349,9 @@ func add_task(task string) {
 		defer stmt.Close()
 		stmt.Exec(equation, "Неверный формат", 0, time.Now().Format("01-02-2006 15:04:05"), time.Now().Format("01-02-2006 15:04:05"))
 	}
+	stmt, _ = db.Prepare("UPDATE Calc SET calc=? WHERE id=?")
+	stmt.Exec("", ar_of_rows[0][0])
+	stmt.Close()
 }
 
 func add_task_page(w http.ResponseWriter, r *http.Request) {
