@@ -16,7 +16,7 @@
     <tr>
         <td class="font-weight-bold text-center">{{ .id }}</td>
         <td class="font-weight-bold text-center">{{ .task }}</td>
-        <td class="font-weight-bold text-center">{{ .status }}</td>
+        <td class={{.color}}>{{ .status }}</td>
         <td class="font-weight-bold text-center">{{ .result }}</td>
         <td class="font-weight-bold text-center">{{ .start }}</td>
         <td class="font-weight-bold text-center">{{ .finish }}</td>
@@ -24,5 +24,8 @@
     {{ end }}
     </tbody>
     </table>
+    <form action="" method="post">
+        <button name="" class="btn btn-outline-danger">Отчистить все вычисления</button>
+    </form>
   </div>
 {{ end }}

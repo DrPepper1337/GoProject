@@ -369,6 +369,11 @@ func operations(w http.ResponseWriter, r *http.Request) {
 }
 
 func tasks(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "POST" {
+		stmt, _ := db.Prepare("DELETE FROM Tasks")
+		stmt.Exec()
+		stmt.Close()
+	}
 	rows, _ := db.Query("SELECT * FROM Tasks")
 	columns, _ := rows.Columns()
 	var result []map[string]interface{}
@@ -387,6 +392,13 @@ func tasks(w http.ResponseWriter, r *http.Request) {
 			} else {
 				row[column] = nil
 			}
+		}
+		if row["status"] == "Успешно" {
+			row["color"] = "table-success"
+		} else if row["status"] == "Проводится подсчёт выражения" {
+			row["color"] = "table-warning"
+		} else {
+			row["color"] = "table-danger"
 		}
 		result = append(result, row)
 	}
@@ -437,11 +449,42 @@ func calc(w http.ResponseWriter, r *http.Request) {
 	tmpl.ExecuteTemplate(w, "base.html", data)
 }
 
+func recover_equations() {
+	rows, _ := db.Query("SELECT * FROM Tasks")
+	columns, _ := rows.Columns()
+	ar_of_rows := make([][]interface{}, 0)
+	for rows.Next() {
+		values := make([]interface{}, len(columns))
+		valuePtr := make([]interface{}, len(columns))
+		for i := range columns {
+			valuePtr[i] = &values[i]
+		}
+		rows.Scan(valuePtr...)
+		ar_of_rows = append(ar_of_rows, values)
+	}
+	rows.Close()
+	for _, value := range ar_of_rows {
+		if value[2] == "Проводится подсчёт выражения" {
+			result := Parse_Task(delete_useless_brackets([]rune(value[1].(string))))
+			if math.IsInf(result, 0) {
+				stmt, _ := db.Prepare("UPDATE Tаsks SET status=?, result = ?, finish = ? WHERE task = ?")
+				defer stmt.Close()
+				stmt.Exec("Деление на 0", 0, time.Now().Format("01-02-2006 15:04:05"), value[1].(string))
+			} else {
+				stmt, _ := db.Prepare("UPDATE Tasks SET status=?, result = ?, finish = ? WHERE task = ?")
+				defer stmt.Close()
+				stmt.Exec("Успешно", result, time.Now().Format("01-02-2006 15:04:05"), value[1].(string))
+			}
+		}
+	}
+}
+
 var db *sql.DB
 
 func main() {
 	if _, err := os.Stat("./data.db"); err == nil {
 		db, _ = sql.Open("sqlite3", "./data.db")
+		go recover_equations()
 	} else if errors.Is(err, os.ErrNotExist) {
 		file, _ := os.Create("data.db")
 		file.Close()
