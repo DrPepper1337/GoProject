@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"html/template"
 	"math"
 	"net/http"
@@ -310,7 +311,7 @@ func add_task(task string) {
 		stmt.Exec(equation, "Ожидает свободного сервера для начала вычислений")
 		stmt.Close()
 		for len(ar_of_rows) == 0 {
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 			rows, _ := db.Query("SELECT * FROM Calc WHERE calc=''")
 			columns, _ := rows.Columns()
 			ar_of_rows = make([][]interface{}, 0)
@@ -438,7 +439,7 @@ func tasks(w http.ResponseWriter, r *http.Request) {
 		}
 		if row["status"] == "Успешно" {
 			row["color"] = "table-success"
-		} else if row["status"] == "Проводится подсчёт выражения" {
+		} else if row["status"] == "Проводится подсчёт выражения" || row["status"] == "Ожидает свободного сервера для начала вычислений" {
 			row["color"] = "table-warning"
 		} else {
 			row["color"] = "table-danger"
@@ -507,7 +508,41 @@ func recover_equations() {
 	}
 	rows.Close()
 	for _, value := range ar_of_rows {
-		if value[2] == "Проводится подсчёт выражения" {
+		if value[2] == "Ожидает свободного сервера для начала вычислений" {
+			rows1, _ := db.Query("SELECT * FROM Calc WHERE calc=''")
+			columns1, _ := rows1.Columns()
+			ar_of_rows1 := make([][]interface{}, 0)
+			for rows1.Next() {
+				values1 := make([]interface{}, len(columns1))
+				valuePtr1 := make([]interface{}, len(columns1))
+				for i := range columns1 {
+					valuePtr1[i] = &values1[i]
+				}
+				rows1.Scan(valuePtr1...)
+				ar_of_rows1 = append(ar_of_rows1, values1)
+			}
+			rows1.Close()
+			for len(ar_of_rows1) == 0 {
+				time.Sleep(100 * time.Millisecond)
+				rows1, _ := db.Query("SELECT * FROM Calc WHERE calc=''")
+				columns1, _ := rows1.Columns()
+				ar_of_rows1 = make([][]interface{}, 0)
+				for rows1.Next() {
+					values1 := make([]interface{}, len(columns1))
+					valuePtr1 := make([]interface{}, len(columns1))
+					for i := range columns1 {
+						valuePtr1[i] = &values1[i]
+					}
+					rows1.Scan(valuePtr1...)
+					ar_of_rows1 = append(ar_of_rows1, values1)
+				}
+			}
+			stmt, _ := db.Prepare("UPDATE Calc SET calc=? WHERE id=?")
+			stmt.Exec(value[1], ar_of_rows[0][0])
+			stmt.Close()
+			stmt, _ = db.Prepare("UPDATE Tasks SET status=?, start=? WHERE task = ?")
+			stmt.Exec("Проводится подсчёт выражения", time.Now().Format("01-02-2006 15:04:05"), value[1])
+			stmt.Close()
 			result := Parse_Task(delete_useless_brackets([]rune(value[1].(string))))
 			if math.IsInf(result, 0) {
 				stmt, _ := db.Prepare("UPDATE Tаsks SET status=?, result = ?, finish = ? WHERE task = ?")
@@ -518,6 +553,24 @@ func recover_equations() {
 				defer stmt.Close()
 				stmt.Exec("Успешно", result, time.Now().Format("01-02-2006 15:04:05"), value[1].(string))
 			}
+			stmt, _ = db.Prepare("UPDATE Calc SET calc=? WHERE calc=?")
+			stmt.Exec("", value[1])
+			stmt.Close()
+		} else if value[2] == "Проводится подсчёт выражения" {
+			result := Parse_Task(delete_useless_brackets([]rune(value[1].(string))))
+			fmt.Println(result)
+			if math.IsInf(result, 0) {
+				stmt, _ := db.Prepare("UPDATE Tаsks SET status=?, result = ?, finish = ? WHERE task = ?")
+				defer stmt.Close()
+				stmt.Exec("Деление на 0", 0, time.Now().Format("01-02-2006 15:04:05"), value[1].(string))
+			} else {
+				stmt, _ := db.Prepare("UPDATE Tasks SET status=?, result = ?, finish = ? WHERE task = ?")
+				defer stmt.Close()
+				stmt.Exec("Успешно", result, time.Now().Format("01-02-2006 15:04:05"), value[1].(string))
+			}
+			stmt, _ := db.Prepare("UPDATE Calc SET calc=? WHERE calc=?")
+			stmt.Exec("", value[1])
+			stmt.Close()
 		}
 	}
 }

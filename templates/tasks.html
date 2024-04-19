@@ -3,7 +3,6 @@
     <table class="table">
     <thead class="thead-dark">
     <tr>
-        <th class="font-weight-bold text-center">id</th>
         <th class="font-weight-bold text-center">Пример</th>
         <th class="font-weight-bold text-center">Статус</th>
         <th class="font-weight-bold text-center">Результат</th>
@@ -14,7 +13,6 @@
     <tbody>
     {{ range .Tasks }}
     <tr>
-        <td class="font-weight-bold text-center">{{ .id }}</td>
         <td class="font-weight-bold text-center">{{ .task }}</td>
         <td class={{.color}}>{{ .status }}</td>
         <td class="font-weight-bold text-center">{{ .result }}</td>
