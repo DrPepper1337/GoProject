@@ -13,8 +13,24 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang-jwt/jwt"
 	_ "github.com/mattn/go-sqlite3"
+	"golang.org/x/crypto/bcrypt"
 )
+
+const hmacSampleSecret = "ReAlLYSecRetKE y"
+
+func get_current_user_id(r *http.Request) float64 {
+	cookie, _ := r.Cookie("auth")
+	tokenString := cookie.Value
+	tokenFromString, _ := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+		}
+		return []byte(hmacSampleSecret), nil
+	})
+	claim, _ := tokenFromString.Claims.(jwt.MapClaims)
+	return claim["user_id"].(float64)
+}
 
 func CheckBrackets(equation string) bool {
 	brackets := 0
@@ -281,20 +297,39 @@ func Parse_Task(task []rune) float64 {
 }
 
 func createTable(db *sql.DB) {
-	db.Exec("CREATE TABLE IF NOT EXISTS Tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, task TEXT, status TEXT, result REAL, start TEXT, finish TEXT)")
-	db.Exec("CREATE TABLE IF NOT EXISTS Operations (operation TEXT PRIMARY KEY, duration INTEGER)")
-	db.Exec("CREATE TABLE IF NOT EXISTS Calc (id INTEGER PRIMARY KEY AUTOINCREMENT, calc TEXT)")
-	db.Exec("INSERT OR IGNORE INTO Operations (operation, duration) VALUES ('+', 1)")
-	db.Exec("INSERT OR IGNORE INTO Operations (operation, duration) VALUES ('-', 1)")
-	db.Exec("INSERT OR IGNORE INTO Operations (operation, duration) VALUES ('*', 1)")
-	db.Exec("INSERT OR IGNORE INTO Operations (operation, duration) VALUES ('/', 1)")
+	db.Exec("CREATE TABLE IF NOT EXISTS Tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, task TEXT, status TEXT, result REAL, start TEXT, finish TEXT, user_id INTEGER)")
+	db.Exec("CREATE TABLE IF NOT EXISTS Operations (operation TEXT, duration INTEGER, user_id INTEGER)")
+	db.Exec("CREATE TABLE IF NOT EXISTS Calc (id INTEGER PRIMARY KEY AUTOINCREMENT, calc TEXT, user_id INTEGER)")
+	db.Exec("CREATE TABLE IF NOT EXISTS User (id INTEGER PRIMARY KEY AUTOINCREMENT, login TEXT, password TEXT)")
 }
 
-func add_task(task string) {
+func check_auth(r *http.Request) bool {
+	cookie, err := r.Cookie("auth")
+	if err != nil {
+		return false
+	}
+	tokenString := cookie.Value
+	tokenFromString, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("err")
+		}
+		return []byte(hmacSampleSecret), nil
+	})
+	if err != nil {
+		return false
+	}
+	if _, ok := tokenFromString.Claims.(jwt.MapClaims); ok {
+		return true
+	} else {
+		return false
+	}
+}
+
+func add_task(task string, id int) {
 	equation := strings.ReplaceAll(task, " ", "")
 	equation = strings.ReplaceAll(equation, ",", ".")
 
-	rows, _ := db.Query("SELECT * FROM Calc WHERE calc=''")
+	rows, _ := db.Query("SELECT * FROM Calc WHERE calc='' AND user_id=?", id)
 	columns, _ := rows.Columns()
 	ar_of_rows := make([][]interface{}, 0)
 	for rows.Next() {
@@ -307,12 +342,12 @@ func add_task(task string) {
 		ar_of_rows = append(ar_of_rows, values)
 	}
 	if len(ar_of_rows) == 0 {
-		stmt, _ := db.Prepare("INSERT OR IGNORE INTO Tasks (task, status) VALUES (?, ?)")
-		stmt.Exec(equation, "Ожидает свободного сервера для начала вычислений")
+		stmt, _ := db.Prepare("INSERT OR IGNORE INTO Tasks (task, status, user_id) VALUES (?, ?, ?)")
+		stmt.Exec(equation, "Ожидает свободного сервера для начала вычислений", id)
 		stmt.Close()
 		for len(ar_of_rows) == 0 {
 			time.Sleep(100 * time.Millisecond)
-			rows, _ := db.Query("SELECT * FROM Calc WHERE calc=''")
+			rows, _ := db.Query("SELECT * FROM Calc WHERE calc='' AND user_id=?", id)
 			columns, _ := rows.Columns()
 			ar_of_rows = make([][]interface{}, 0)
 			for rows.Next() {
@@ -326,46 +361,56 @@ func add_task(task string) {
 			}
 		}
 	} else {
-		stmt, _ := db.Prepare("INSERT OR IGNORE INTO Tasks (task) VALUES (?)")
-		stmt.Exec(equation)
+		stmt, _ := db.Prepare("INSERT OR IGNORE INTO Tasks (task, user_id) VALUES (?, ?)")
+		stmt.Exec(equation, id)
 		stmt.Close()
 	}
-	stmt, _ := db.Prepare("UPDATE Calc SET calc=? WHERE id=?")
-	stmt.Exec(equation, ar_of_rows[0][0])
+	stmt, _ := db.Prepare("UPDATE Calc SET calc=? WHERE id=? AND user_id=?")
+	stmt.Exec(equation, ar_of_rows[0][0], id)
 	stmt.Close()
 	if ValidEquation(equation, 0, len(equation)) && CheckBrackets(equation) {
-		stmt, _ := db.Prepare("UPDATE Tasks SET status=?, start=? WHERE task = ?")
+		stmt, _ := db.Prepare("UPDATE Tasks SET status=?, start=? WHERE task = ? AND user_id=?")
 		defer stmt.Close()
-		stmt.Exec("Проводится подсчёт выражения", time.Now().Format("01-02-2006 15:04:05"), equation)
+		stmt.Exec("Проводится подсчёт выражения", time.Now().Format("01-02-2006 15:04:05"), equation, id)
 		result := Parse_Task(delete_useless_brackets([]rune(equation)))
 		if math.IsInf(result, 0) {
-			stmt, _ = db.Prepare("UPDATE Tasks SET status=?, result = ?, finish = ? WHERE task = ?")
-			stmt.Exec("Деление на 0", 0, time.Now().Format("01-02-2006 15:04:05"), equation)
+			stmt, _ = db.Prepare("UPDATE Tasks SET status=?, result = ?, finish = ? WHERE task = ? AND user_id=?")
+			stmt.Exec("Деление на 0", 0, time.Now().Format("01-02-2006 15:04:05"), equation, id)
 		} else {
-			stmt, _ = db.Prepare("UPDATE Tasks SET status=?, result = ?, finish = ? WHERE task = ?")
-			stmt.Exec("Успешно", result, time.Now().Format("01-02-2006 15:04:05"), equation)
+			stmt, _ = db.Prepare("UPDATE Tasks SET status=?, result = ?, finish = ? WHERE task = ? AND user_id=?")
+			stmt.Exec("Успешно", result, time.Now().Format("01-02-2006 15:04:05"), equation, id)
 		}
 	} else {
-		stmt, _ := db.Prepare("INSERT OR IGNORE INTO Tasks (task, status, result, start, finish) VALUES (?, ?, ?, ?, ?)")
+		stmt, _ := db.Prepare("INSERT OR IGNORE INTO Tasks (task, status, result, start, finish, user_id) VALUES (?, ?, ?, ?, ?, ?)")
 		defer stmt.Close()
-		stmt.Exec(equation, "Неверный формат", 0, time.Now().Format("01-02-2006 15:04:05"), time.Now().Format("01-02-2006 15:04:05"))
+		stmt.Exec(equation, "Неверный формат", 0, time.Now().Format("01-02-2006 15:04:05"), time.Now().Format("01-02-2006 15:04:05"), id)
 	}
-	stmt, _ = db.Prepare("UPDATE Calc SET calc=? WHERE id=?")
-	stmt.Exec("", ar_of_rows[0][0])
+	stmt, _ = db.Prepare("UPDATE Calc SET calc=? WHERE id=? AND user_id=?")
+	stmt.Exec("", ar_of_rows[0][0], id)
 	stmt.Close()
 }
 
 func add_task_page(w http.ResponseWriter, r *http.Request) {
+	if !check_auth(r) {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
 	if r.Method == "POST" {
+		user_id := get_current_user_id(r)
 		r.ParseForm()
 		var task = r.FormValue("task")
-		go add_task(task)
+		go add_task(task, int(user_id))
 	}
 	tmpl, _ := template.ParseFiles("templates\\base.html", "templates\\index.html")
 	tmpl.ExecuteTemplate(w, "base.html", nil)
 }
 
 func operations(w http.ResponseWriter, r *http.Request) {
+	if !check_auth(r) {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	user_id := get_current_user_id(r)
 	if r.Method == "POST" {
 		r.ParseForm()
 		var plus = r.FormValue("+")
@@ -374,13 +419,13 @@ func operations(w http.ResponseWriter, r *http.Request) {
 		var divide = r.FormValue("/")
 		durations := []string{plus, minus, multiply, divide}
 		for i, opType := range []string{"+", "-", "*", "/"} {
-			stmt, _ := db.Prepare("UPDATE Operations SET duration = ? WHERE operation = ?")
+			stmt, _ := db.Prepare("UPDATE Operations SET duration = ? WHERE operation = ? AND user_id=?")
 			durationInt, _ := strconv.Atoi(durations[i])
-			stmt.Exec(durationInt, opType)
+			stmt.Exec(durationInt, opType, int(user_id))
 			stmt.Close()
 		}
 	}
-	rows, _ := db.Query("SELECT * FROM Operations")
+	rows, _ := db.Query("SELECT * FROM Operations WHERE user_id=?", int(user_id))
 	columns, _ := rows.Columns()
 	var result []map[string]interface{}
 	for rows.Next() {
@@ -413,12 +458,17 @@ func operations(w http.ResponseWriter, r *http.Request) {
 }
 
 func tasks(w http.ResponseWriter, r *http.Request) {
+	if !check_auth(r) {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	user_id := get_current_user_id(r)
 	if r.Method == "POST" {
 		stmt, _ := db.Prepare("DELETE FROM Tasks")
 		stmt.Exec()
 		stmt.Close()
 	}
-	rows, _ := db.Query("SELECT * FROM Tasks")
+	rows, _ := db.Query("SELECT * FROM Tasks WHERE user_id=?", int(user_id))
 	columns, _ := rows.Columns()
 	var result []map[string]interface{}
 	for rows.Next() {
@@ -458,10 +508,15 @@ func tasks(w http.ResponseWriter, r *http.Request) {
 }
 
 func calc(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "POST" {
-		db.Exec("INSERT OR IGNORE INTO Calc (calc) VALUES ('')")
+	if !check_auth(r) {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
 	}
-	rows, _ := db.Query("SELECT * FROM Calc")
+	user_id := get_current_user_id(r)
+	if r.Method == "POST" {
+		db.Exec("INSERT OR IGNORE INTO Calc (calc, user_id) VALUES ('', ?)", int(user_id))
+	}
+	rows, _ := db.Query("SELECT * FROM Calc WHERE user_id=?", int(user_id))
 	columns, _ := rows.Columns()
 	var result []map[string]interface{}
 	for rows.Next() {
@@ -558,7 +613,6 @@ func recover_equations() {
 			stmt.Close()
 		} else if value[2] == "Проводится подсчёт выражения" {
 			result := Parse_Task(delete_useless_brackets([]rune(value[1].(string))))
-			fmt.Println(result)
 			if math.IsInf(result, 0) {
 				stmt, _ := db.Prepare("UPDATE Tаsks SET status=?, result = ?, finish = ? WHERE task = ?")
 				defer stmt.Close()
@@ -575,6 +629,112 @@ func recover_equations() {
 	}
 }
 
+func HashPassword(password string) (string, error) {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 14)
+	return string(bytes), err
+}
+
+func CheckPasswordHash(password string, hash string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	return err == nil
+}
+
+func login(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "POST" {
+		r.ParseForm()
+		var login = r.FormValue("login")
+		var password = r.FormValue("password")
+		type User struct {
+			id       *int
+			login    *string
+			password *string
+		}
+		user := User{}
+		row := db.QueryRow("SELECT * FROM User WHERE login=?", login)
+		row.Scan(&user.id, &user.login, &user.password)
+		if user.id == nil {
+			http.Redirect(w, r, "/register", http.StatusSeeOther)
+			return
+		}
+		if CheckPasswordHash(password, *user.password) {
+			now := time.Now()
+			token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+				"user_id": user.id,
+				"nbf":     now.Unix(),
+				"exp":     now.Add(60 * time.Minute).Unix(),
+				"iat":     now.Unix(),
+			})
+			tokenString, _ := token.SignedString([]byte(hmacSampleSecret))
+
+			cookie := http.Cookie{
+				Name:     "auth",
+				Value:    tokenString,
+				MaxAge:   0,
+				HttpOnly: true,
+				Secure:   true,
+				SameSite: http.SameSiteLaxMode,
+			}
+			http.SetCookie(w, &cookie)
+
+			http.Redirect(w, r, "/add_task_page", http.StatusSeeOther)
+		} else {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+		}
+	}
+	tmpl, _ := template.ParseFiles("templates\\base.html", "templates\\login.html")
+	tmpl.ExecuteTemplate(w, "base.html", nil)
+}
+
+func register(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "POST" {
+		r.ParseForm()
+		var login = r.FormValue("login")
+		var password = r.FormValue("password")
+		stmt, _ := db.Prepare("INSERT OR IGNORE INTO User (login, password) VALUES (?, ?)")
+		defer stmt.Close()
+		password_hashed, _ := HashPassword(password)
+		type User struct {
+			id       *int
+			login    *string
+			password *string
+		}
+		user := User{}
+		row := db.QueryRow("SELECT * FROM User WHERE login=?", login)
+		row.Scan(&user.id, &user.login, &user.password)
+		if user.id != nil {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		result, _ := stmt.Exec(login, password_hashed)
+		new_user_id, _ := result.LastInsertId()
+		db.Exec("INSERT OR IGNORE INTO Operations (operation, duration, user_id) VALUES ('+', 1, ?)", new_user_id)
+		db.Exec("INSERT OR IGNORE INTO Operations (operation, duration, user_id) VALUES ('-', 1, ?)", new_user_id)
+		db.Exec("INSERT OR IGNORE INTO Operations (operation, duration, user_id) VALUES ('*', 1, ?)", new_user_id)
+		db.Exec("INSERT OR IGNORE INTO Operations (operation, duration, user_id) VALUES ('/', 1, ?)", new_user_id)
+		now := time.Now()
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+			"user_id": new_user_id,
+			"nbf":     now.Unix(),
+			"exp":     now.Add(60 * time.Minute).Unix(),
+			"iat":     now.Unix(),
+		})
+		tokenString, _ := token.SignedString([]byte(hmacSampleSecret))
+		cookie := http.Cookie{
+			Name:     "auth",
+			Value:    tokenString,
+			MaxAge:   0,
+			HttpOnly: true,
+			Secure:   true,
+			SameSite: http.SameSiteLaxMode,
+		}
+		http.SetCookie(w, &cookie)
+
+		http.Redirect(w, r, "/add_task_page", http.StatusSeeOther)
+	}
+	tmpl, _ := template.ParseFiles("templates\\base.html", "templates\\register.html")
+	tmpl.ExecuteTemplate(w, "base.html", nil)
+}
+
 var db *sql.DB
 
 func main() {
@@ -588,9 +748,11 @@ func main() {
 		createTable(db)
 	}
 	defer db.Close()
-	http.HandleFunc("/operations", operations)
-	http.HandleFunc("/add_task_page", add_task_page)
-	http.HandleFunc("/calc", calc)
-	http.HandleFunc("/tasks", tasks)
+	http.Handle("/operations", http.HandlerFunc(operations))
+	http.Handle("/add_task_page", http.HandlerFunc(add_task_page))
+	http.Handle("/calc", http.HandlerFunc(calc))
+	http.Handle("/tasks", http.HandlerFunc(tasks))
+	http.HandleFunc("/login", login)
+	http.HandleFunc("/register", register)
 	http.ListenAndServe(":8080", nil)
 }
