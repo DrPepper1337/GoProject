@@ -10,9 +10,9 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/DrPepper1337/GoProject/agent"
 	"github.com/golang-jwt/jwt"
 	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/crypto/bcrypt"
@@ -32,97 +32,6 @@ func get_current_user_id(r *http.Request) float64 {
 	return claim["user_id"].(float64)
 }
 
-func CheckBrackets(equation string) bool {
-	brackets := 0
-	for _, elem := range equation {
-		if brackets < 0 {
-			return false
-		}
-		if string(elem) == "(" {
-			brackets += 1
-		} else if string(elem) == ")" {
-			brackets -= 1
-		}
-	}
-	return true
-}
-
-func ValidEquation(equation string, start, end int) bool {
-	if end-start <= 0 {
-		return false
-	}
-	end = min(end, len(equation))
-	seenDot := false
-	for i := start; i < end; i++ {
-		if equation[i] == '(' {
-			seenDot = false
-			validInner := false
-			parenthesis := 1
-			for j := i + 1; j < end; j++ {
-				if equation[j] == '(' {
-					parenthesis++
-				} else if equation[j] == ')' {
-					parenthesis--
-					if parenthesis == 0 {
-						if !ValidEquation(equation, i+1, j) {
-							return false
-						}
-						i = j + 1
-						validInner = true
-						break
-					}
-				}
-			}
-			if !validInner {
-				return false
-			}
-		} else if equation[i] == ')' {
-			return false
-		} else if isOperator(rune(equation[i])) {
-			seenDot = false
-			if i == start {
-				if equation[i] == '*' || equation[i] == '/' {
-					return false
-				}
-			} else {
-				if isOperator(rune(equation[i-1])) {
-					return false
-				}
-			}
-			if i == end-1 || isOperator(rune(equation[i+1])) {
-				return false
-			}
-		} else if !('0' <= equation[i] && equation[i] <= '9') {
-			if equation[i] == '.' && !seenDot {
-				seenDot = true
-			} else {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func isOperator(c rune) bool {
-	return c == '+' || c == '-' || c == '*' || c == '/'
-}
-
-func sum(n1, n2 float64) float64 {
-	return n1 + n2
-}
-
-func minus(n1, n2 float64) float64 {
-	return n1 - n2
-}
-
-func multiply(n1, n2 float64) float64 {
-	return n1 * n2
-}
-
-func division(n1, n2 float64) float64 {
-	return n1 / n2
-}
-
 func OperationTime(operation string) int {
 	rows, _ := db.Query("SELECT duration FROM Operations WHERE operation = ?", operation)
 	defer rows.Close()
@@ -132,168 +41,6 @@ func OperationTime(operation string) int {
 		rows.Scan(&duration)
 	}
 	return duration
-}
-
-func delete_useless_brackets(end_str []rune) []rune {
-	brackets_number2 := 0
-	if string(end_str[0]) == "(" && string(end_str[len(end_str)-1]) == ")" {
-		flag := true
-		for bnd, elem := range end_str {
-			if bnd != len(end_str)-1 && bnd != 0 && brackets_number2 == 0 {
-				flag = false
-			}
-			if string(elem) == "(" {
-				brackets_number2 += 1
-			} else if string(elem) == ")" {
-				brackets_number2 -= 1
-			}
-		}
-		if flag {
-			end_str = end_str[1 : len(end_str)-1]
-		}
-	}
-	return end_str
-}
-
-func Parse_Task(task []rune) float64 {
-	state := ""
-	current_string := ""
-	brackets_number := 0
-	if n, err := strconv.ParseFloat(string(task), 64); err == nil {
-		return n
-	}
-	for i, letter := range task {
-		if string(letter) == "(" {
-			if brackets_number == 0 {
-				state = "("
-				brackets_number += 1
-			} else {
-				brackets_number += 1
-			}
-			current_string += string(letter)
-		} else if string(letter) == "." {
-			current_string += string(letter)
-		} else if string(letter) == ")" {
-			if brackets_number == 1 {
-				brackets_number--
-				state = ""
-			} else {
-				brackets_number--
-			}
-			current_string += string(letter)
-		} else if letter <= 57 && 48 <= letter {
-			current_string += string(letter)
-		} else if string(letter) == "+" {
-			if state == "(" {
-				current_string += string(letter)
-			} else if state == "" {
-				end_str := []rune(task)[i+1:]
-				var wg sync.WaitGroup
-				var n1, n2 float64
-				wg.Add(2)
-				go func() {
-					defer wg.Done()
-					n1 = Parse_Task(delete_useless_brackets([]rune(current_string)))
-				}()
-				go func() {
-					defer wg.Done()
-					n2 = Parse_Task(delete_useless_brackets(end_str))
-				}()
-				wg.Wait()
-				time.Sleep(time.Duration(OperationTime("+")) * time.Millisecond)
-				return sum(n1, n2)
-			}
-		} else if string(letter) == "-" {
-			if state == "(" || i == 0 || (task[i-1] > 57 && 48 > task[i-1]) {
-				current_string += string(letter)
-			} else if state == "" {
-				end_str := task[i+1:]
-				var wg sync.WaitGroup
-				var n1, n2 float64
-				wg.Add(2)
-				go func() {
-					defer wg.Done()
-					n1 = Parse_Task(delete_useless_brackets([]rune(current_string)))
-				}()
-				go func() {
-					defer wg.Done()
-					n2 = Parse_Task(delete_useless_brackets(end_str))
-				}()
-				wg.Wait()
-				time.Sleep(time.Duration(OperationTime("-")) * time.Millisecond)
-				return minus(n1, n2)
-			}
-		} else if string(letter) == "*" {
-			if state == "(" {
-				current_string += string(letter)
-			} else if state == "" {
-				flag := true
-				brackets_number1 := 0
-				for _, symbol := range task[i+1:] {
-					if string(symbol) == "(" {
-						brackets_number1 += 1
-					} else if string(symbol) == ")" {
-						brackets_number1 -= 1
-					} else if (string(symbol) == "+" || string(symbol) == "-") && brackets_number1 == 0 {
-						flag = false
-					}
-				}
-				if flag {
-					end_str := task[i+1:]
-					var wg sync.WaitGroup
-					var n1, n2 float64
-					wg.Add(2)
-					go func() {
-						defer wg.Done()
-						n1 = Parse_Task(delete_useless_brackets([]rune(current_string)))
-					}()
-					go func() {
-						defer wg.Done()
-						n2 = Parse_Task(delete_useless_brackets(end_str))
-					}()
-					wg.Wait()
-					time.Sleep(time.Duration(OperationTime("*")) * time.Millisecond)
-					return multiply(n1, n2)
-				}
-				current_string += string(letter)
-			}
-		} else if string(letter) == "/" {
-			if state == "(" {
-				current_string += string(letter)
-			} else if state == "" {
-				flag := true
-				brackets_number1 := 0
-				for _, symbol := range task[i+1:] {
-					if string(symbol) == "(" {
-						brackets_number1 += 1
-					} else if string(symbol) == ")" {
-						brackets_number1 -= 1
-					} else if (string(symbol) == "+" || string(symbol) == "-" || string(symbol) == "/" || string(symbol) == "*") && brackets_number1 == 0 {
-						flag = false
-					}
-				}
-				if flag {
-					end_str := task[i+1:]
-					var wg sync.WaitGroup
-					var n1, n2 float64
-					wg.Add(2)
-					go func() {
-						defer wg.Done()
-						n1 = Parse_Task(delete_useless_brackets([]rune(current_string)))
-					}()
-					go func() {
-						defer wg.Done()
-						n2 = Parse_Task(delete_useless_brackets(end_str))
-					}()
-					wg.Wait()
-					time.Sleep(time.Duration(OperationTime("/")) * time.Millisecond)
-					return division(n1, n2)
-				}
-				current_string += string(letter)
-			}
-		}
-	}
-	return 1.0
 }
 
 func createTable(db *sql.DB) {
@@ -368,11 +115,11 @@ func add_task(task string, id int) {
 	stmt, _ := db.Prepare("UPDATE Calc SET calc=? WHERE id=? AND user_id=?")
 	stmt.Exec(equation, ar_of_rows[0][0], id)
 	stmt.Close()
-	if ValidEquation(equation, 0, len(equation)) && CheckBrackets(equation) {
+	if agent.ValidEquation(equation, 0, len(equation)) && agent.CheckBrackets(equation) {
 		stmt, _ := db.Prepare("UPDATE Tasks SET status=?, start=? WHERE task = ? AND user_id=?")
 		defer stmt.Close()
 		stmt.Exec("Проводится подсчёт выражения", time.Now().Format("01-02-2006 15:04:05"), equation, id)
-		result := Parse_Task(delete_useless_brackets([]rune(equation)))
+		result := agent.Parse_Task(agent.Delete_useless_brackets([]rune(equation)), db, id)
 		if math.IsInf(result, 0) {
 			stmt, _ = db.Prepare("UPDATE Tasks SET status=?, result = ?, finish = ? WHERE task = ? AND user_id=?")
 			stmt.Exec("Деление на 0", 0, time.Now().Format("01-02-2006 15:04:05"), equation, id)
@@ -564,7 +311,7 @@ func recover_equations() {
 	rows.Close()
 	for _, value := range ar_of_rows {
 		if value[2] == "Ожидает свободного сервера для начала вычислений" {
-			rows1, _ := db.Query("SELECT * FROM Calc WHERE calc=''")
+			rows1, _ := db.Query("SELECT * FROM Calc WHERE calc='' AND user_id=?", value[6].(int64))
 			columns1, _ := rows1.Columns()
 			ar_of_rows1 := make([][]interface{}, 0)
 			for rows1.Next() {
@@ -579,7 +326,7 @@ func recover_equations() {
 			rows1.Close()
 			for len(ar_of_rows1) == 0 {
 				time.Sleep(100 * time.Millisecond)
-				rows1, _ := db.Query("SELECT * FROM Calc WHERE calc=''")
+				rows1, _ := db.Query("SELECT * FROM Calc WHERE calc='' AND user_id=?", value[6].(int64))
 				columns1, _ := rows1.Columns()
 				ar_of_rows1 = make([][]interface{}, 0)
 				for rows1.Next() {
@@ -595,35 +342,35 @@ func recover_equations() {
 			stmt, _ := db.Prepare("UPDATE Calc SET calc=? WHERE id=?")
 			stmt.Exec(value[1], ar_of_rows[0][0])
 			stmt.Close()
-			stmt, _ = db.Prepare("UPDATE Tasks SET status=?, start=? WHERE task = ?")
-			stmt.Exec("Проводится подсчёт выражения", time.Now().Format("01-02-2006 15:04:05"), value[1])
+			stmt, _ = db.Prepare("UPDATE Tasks SET status=?, start=? WHERE task = ? AND user_id=?")
+			stmt.Exec("Проводится подсчёт выражения", time.Now().Format("01-02-2006 15:04:05"), value[1], value[6].(int64))
 			stmt.Close()
-			result := Parse_Task(delete_useless_brackets([]rune(value[1].(string))))
+			result := agent.Parse_Task(agent.Delete_useless_brackets([]rune(value[1].(string))), db, int(value[6].(int64)))
 			if math.IsInf(result, 0) {
-				stmt, _ := db.Prepare("UPDATE Tаsks SET status=?, result = ?, finish = ? WHERE task = ?")
+				stmt, _ := db.Prepare("UPDATE Tаsks SET status=?, result = ?, finish = ? WHERE task = ? AND user_id=?")
 				defer stmt.Close()
-				stmt.Exec("Деление на 0", 0, time.Now().Format("01-02-2006 15:04:05"), value[1].(string))
+				stmt.Exec("Деление на 0", 0, time.Now().Format("01-02-2006 15:04:05"), value[1].(string), value[6].(int64))
 			} else {
-				stmt, _ := db.Prepare("UPDATE Tasks SET status=?, result = ?, finish = ? WHERE task = ?")
+				stmt, _ := db.Prepare("UPDATE Tasks SET status=?, result = ?, finish = ? WHERE task = ? AND user_id=?")
 				defer stmt.Close()
-				stmt.Exec("Успешно", result, time.Now().Format("01-02-2006 15:04:05"), value[1].(string))
+				stmt.Exec("Успешно", result, time.Now().Format("01-02-2006 15:04:05"), value[1].(string), value[6].(int64))
 			}
-			stmt, _ = db.Prepare("UPDATE Calc SET calc=? WHERE calc=?")
-			stmt.Exec("", value[1])
+			stmt, _ = db.Prepare("UPDATE Calc SET calc=? WHERE calc=? AND user_id=?")
+			stmt.Exec("", value[1], value[6].(int64))
 			stmt.Close()
 		} else if value[2] == "Проводится подсчёт выражения" {
-			result := Parse_Task(delete_useless_brackets([]rune(value[1].(string))))
+			result := agent.Parse_Task(agent.Delete_useless_brackets([]rune(value[1].(string))), db, int(value[6].(int64)))
 			if math.IsInf(result, 0) {
-				stmt, _ := db.Prepare("UPDATE Tаsks SET status=?, result = ?, finish = ? WHERE task = ?")
+				stmt, _ := db.Prepare("UPDATE Tаsks SET status=?, result = ?, finish = ? WHERE task = ? AND user_id=?")
 				defer stmt.Close()
-				stmt.Exec("Деление на 0", 0, time.Now().Format("01-02-2006 15:04:05"), value[1].(string))
+				stmt.Exec("Деление на 0", 0, time.Now().Format("01-02-2006 15:04:05"), value[1].(string), value[6].(int64))
 			} else {
-				stmt, _ := db.Prepare("UPDATE Tasks SET status=?, result = ?, finish = ? WHERE task = ?")
+				stmt, _ := db.Prepare("UPDATE Tasks SET status=?, result = ?, finish = ? WHERE task = ? AND user_id=?")
 				defer stmt.Close()
-				stmt.Exec("Успешно", result, time.Now().Format("01-02-2006 15:04:05"), value[1].(string))
+				stmt.Exec("Успешно", result, time.Now().Format("01-02-2006 15:04:05"), value[1].(string), value[6].(int64))
 			}
-			stmt, _ := db.Prepare("UPDATE Calc SET calc=? WHERE calc=?")
-			stmt.Exec("", value[1])
+			stmt, _ := db.Prepare("UPDATE Calc SET calc=? WHERE calc=? AND user_id=?")
+			stmt.Exec("", value[1], value[6].(int64))
 			stmt.Close()
 		}
 	}
