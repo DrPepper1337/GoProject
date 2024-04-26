@@ -18,9 +18,9 @@ go test
 ## Структура проекта
 ```mermaid
 classDiagram
-    Users <-- Tasks
-    Users <-- Operations
-    Equations <-- Calc
+    User <-- Tasks
+    User <-- Operations
+    Tasks <-- Calc
     class Tasks{
       id
       task
